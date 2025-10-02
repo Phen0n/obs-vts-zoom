@@ -156,9 +156,8 @@ class VTSZoomController:
         sh = obs.obs_source_get_height(source)
         
         scale = obs.vec2()
-        obs.obs_sceneitem_get_scale(item, scale)
-        
         bounds = obs.vec2()
+        obs.obs_sceneitem_get_scale(item, scale)
         obs.obs_sceneitem_get_bounds(item, bounds)
         bbtype = obs.obs_sceneitem_get_bounds_type(item)
         
@@ -176,10 +175,10 @@ class VTSZoomController:
     
     def calculate_zoom_transform(self, item, factor: float, target_x: float, target_y: float) -> Tuple[Optional[obs.vec2], obs.vec2, Optional[obs.vec2]]:
         pos = obs.vec2()
-        obs.obs_sceneitem_get_pos(item, pos)
         scale = obs.vec2()
-        obs.obs_sceneitem_get_scale(item, scale)
         bounds = obs.vec2()
+        obs.obs_sceneitem_get_pos(item, pos)
+        obs.obs_sceneitem_get_scale(item, scale)
         obs.obs_sceneitem_get_bounds(item, bounds)
         bbtype = obs.obs_sceneitem_get_bounds_type(item)
         
@@ -192,8 +191,7 @@ class VTSZoomController:
         
         if bbtype == obs.OBS_BOUNDS_NONE:
             # scale
-            new_scale = obs.vec2()
-            obs.vec2_mulf(new_scale, scale, factor)
+            new_scale = vec2_mulf(scale, factor)
             new_pos.x = (cw / 2) - target_x * ew * new_scale.x
             new_pos.y = (ch / 2) - target_y * eh * new_scale.y
             
@@ -207,8 +205,7 @@ class VTSZoomController:
                     new_pos.y = self._clamp(new_pos.y, ch - new_h, 0)
         else:
             # bounds
-            new_bounds = obs.vec2()
-            obs.vec2_mulf(new_bounds, bounds, factor)
+            new_bounds = vec2_mulf(bounds, factor)
             new_pos.x = (cw / 2) - target_x * new_bounds.x
             new_pos.y = (ch / 2) - target_y * new_bounds.y
             
@@ -219,13 +216,6 @@ class VTSZoomController:
                     new_pos.y = self._clamp(new_pos.y, ch - new_bounds.y, 0)
         
         return new_scale, new_pos, new_bounds
-    
-    def lerp_vec2(self, result: obs.vec2, start: obs.vec2, end: obs.vec2, t: float):
-        # start + (end - start) * t
-        temp = obs.vec2()
-        obs.vec2_sub(temp, end, start)       # end - start
-        obs.vec2_mulf(temp, temp, t)         # * t
-        obs.vec2_add(result, start, temp)    # + start
     
     def animate_zoom(self):
         if not self.source_name:
@@ -247,7 +237,6 @@ class VTSZoomController:
         start_scale = obs.vec2()
         start_pos = obs.vec2()
         start_bounds = obs.vec2()
-        
         obs.obs_sceneitem_get_scale(item, start_scale)
         obs.obs_sceneitem_get_pos(item, start_pos)
         obs.obs_sceneitem_get_bounds(item, start_bounds)
@@ -257,35 +246,17 @@ class VTSZoomController:
                 item, self.zoom_target.factor, self.zoom_target.x, self.zoom_target.y
             )
             if end_scale is None:
-                end_scale = obs.vec2()
-                obs.vec2_copy(end_scale, start_scale)
+                end_scale = vec2_copy(start_scale)
             if end_bounds is None:
-                end_bounds = obs.vec2()
-                obs.vec2_copy(end_bounds, start_bounds)
+                end_bounds = vec2_copy(start_bounds)
         else:  
-            if self.saved_transform.scale:
-                end_scale = self.saved_transform.scale
-            else:
-                end_scale = obs.vec2()
-                obs.vec2_copy(end_scale, start_scale)
-            if self.saved_transform.pos:
-                end_pos = self.saved_transform.pos
-            else:
-                end_pos = obs.vec2()
-                obs.vec2_copy(end_pos, start_pos)
-            if self.saved_transform.bounds:
-                end_bounds = self.saved_transform.bounds
-            else:
-                end_bounds = obs.vec2()
-                obs.vec2_copy(end_bounds, start_bounds)
+            end_scale = self.saved_transform.scale or vec2_copy(start_scale)
+            end_pos = self.saved_transform.pos or vec2_copy(start_pos)
+            end_bounds = self.saved_transform.bounds or vec2_copy(start_bounds)
         
         frames = max(1, self.zoom_speed)
         frame_time = 1.0 / 60.0  # 60 FPS
 
-        current_scale = obs.vec2()
-        current_pos = obs.vec2()
-        current_bounds = obs.vec2()
-        
         for frame in range(frames):
             if not self.animation_active:
                 break
@@ -293,9 +264,9 @@ class VTSZoomController:
             t = (frame + 1) / frames
             t_eased = self._ease_in_out_cubic(t)
             
-            self.lerp_vec2(current_scale, start_scale, end_scale, t_eased)
-            self.lerp_vec2(current_pos, start_pos, end_pos, t_eased)
-            self.lerp_vec2(current_bounds, start_bounds, end_bounds, t_eased)
+            current_scale = vec2_lerp(start_scale, end_scale, t_eased)
+            current_pos = vec2_lerp(start_pos, end_pos, t_eased)
+            current_bounds = vec2_lerp(start_bounds, end_bounds, t_eased)
             
             obs.obs_sceneitem_set_scale(item, current_scale)
             obs.obs_sceneitem_set_pos(item, current_pos)
@@ -314,14 +285,19 @@ class VTSZoomController:
         obs.obs_source_release(scene)
     
     def toggle_zoom(self, pressed):
-        if not pressed or not self.source_name:
+        if not pressed:
+            return
+        if not self.source_name:
+            obs.script_log(obs.LOG_WARNING, 'Warning: No zoom source set')
             return
         
         if self.animation_active:
+            obs.script_log(obs.LOG_INFO, 'Animation already in progress')
             return
         
         source = obs.obs_get_source_by_name(self.source_name)
         if not source:
+            obs.script_log(obs.LOG_WARNING, f'Warning: No source found with name "{self.source_name}". Name must match fully, including case.')
             return
         
         scene = obs.obs_frontend_get_current_scene()
@@ -331,6 +307,7 @@ class VTSZoomController:
         if not item:
             obs.obs_source_release(source)
             obs.obs_source_release(scene)
+            obs.script_log(obs.LOG_WARNING, f'Warning: Source "{self.source_name}" not in current scene')
             return
         
         if self.zoom_state in [ZoomState.IDLE, ZoomState.ZOOMING_OUT]:
@@ -341,14 +318,11 @@ class VTSZoomController:
             obs.obs_sceneitem_get_pos(item, pos)
             obs.obs_sceneitem_get_bounds(item, bounds)
 
-            saved_scale = obs.vec2()
-            saved_pos = obs.vec2()
-            saved_bounds = obs.vec2()
-            obs.vec2_copy(saved_scale, scale)
-            obs.vec2_copy(saved_pos, pos)
-            obs.vec2_copy(saved_bounds, bounds)
-            
-            self.saved_transform = TransformState(saved_scale, saved_pos, saved_bounds)
+            self.saved_transform = TransformState(
+                    vec2_copy(scale),
+                    vec2_copy(pos),
+                    vec2_copy(bounds)
+                )
             self.zoom_state = ZoomState.ZOOMING_IN
         else:
             self.zoom_state = ZoomState.ZOOMING_OUT
@@ -402,6 +376,30 @@ def toggle_zoom_cb(pressed):
     global controller
     if pressed:
         controller.toggle_zoom(pressed)
+
+def vec2_copy(source: obs.vec2) -> obs.vec2:
+    result = obs.vec2()
+    obs.vec2_copy(result, source)
+    return result
+
+def vec2_mulf(vec: obs.vec2, scalar: float) -> obs.vec2:
+    result = obs.vec2()
+    obs.vec2_mulf(result, vec, scalar)
+    return result
+
+def vec2_add(a: obs.vec2, b: obs.vec2) -> obs.vec2:
+    result = obs.vec2()
+    obs.vec2_add(result, a, b)
+    return result
+
+def vec2_sub(a: obs.vec2, b: obs.vec2) -> obs.vec2:
+    result = obs.vec2()
+    obs.vec2_sub(result, a, b)
+    return result
+
+def vec2_lerp(start: obs.vec2, end: obs.vec2, t: float) -> obs.vec2:
+    # start + (end - start) * t
+    return vec2_add(start, vec2_mulf(vec2_sub(end, start), t))
 
 def script_description():
     return 'Toggle zoom based on VTS model location/size.\nOn websocket errors, please make sure VTube Studio is running and API is enabled, then reload script.\n\nBy Phenon'
